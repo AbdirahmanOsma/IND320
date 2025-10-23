@@ -1,4 +1,4 @@
-import os\nfrom dotenv import load_dotenv\nload_dotenv()\nfrom __future__ import annotations
+from __future__ import annotations
 
 
 import numpy as np
@@ -117,7 +117,8 @@ elif page == "Project 2: Energy Dashboard":
     try:
         # MongoDB connection
         client = MongoClient(
-            os.getenv("MONGODB_URI"),\n            server_api=ServerApi('1')
+            "mongodb+srv://ind320_user:Calanka12@ind320.762ezjs.mongodb.net/?retryWrites=true&w=majority&appName=ind320",
+            server_api=ServerApi('1')
         )
         client.admin.command('ping')
 

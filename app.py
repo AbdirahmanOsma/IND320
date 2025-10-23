@@ -3,6 +3,12 @@ from __future__ import annotations
 
 import numpy as np
 import streamlit as st
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+MONGODB_URI = os.getenv("MONGODB_URI")
+
 import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path 

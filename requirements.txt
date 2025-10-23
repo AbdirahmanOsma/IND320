@@ -26,3 +26,4 @@ kaleido
 lipsum
 pymongo
 streamlit
+python-dotenv 

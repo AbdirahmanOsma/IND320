@@ -16,7 +16,7 @@ st.set_page_config(page_title="IND320 Dashboard", layout="wide")
 st.sidebar.title("Navigation")
 
 # ---------- Project 1 Data ----------
-# If your CSV lives at repo root /data, and this file is in /streamlit_app:
+# FIXED: Correct CSV path for Streamlit Cloud
 DATA_FILE = Path(__file__).resolve().parent.parent / "data" / "open-meteo-subset.csv"
 
 @st.cache_data(show_spinner=False)
@@ -96,21 +96,14 @@ elif page == "Project 2: Energy Dashboard":
     st.header("Energy Production Dashboard")
 
     try:
-        # FIXED: Use st.secrets for Streamlit Cloud, fallback to .env for local
-        if hasattr(st, 'secrets') and 'MONGO_URI' in st.secrets:
-            mongodb_uri = st.secrets['MONGO_URI']
-        else:
-            mongodb_uri = os.getenv("MONGODB_URI")
-        
-        if not mongodb_uri:
-            st.error("No MongoDB URI found. Set MONGO_URI in Streamlit secrets or MONGODB_URI in environment.")
-            st.stop()
-
-        client = MongoClient(mongodb_uri, server_api=ServerApi('1'))
+        # FIXED: Use st.secrets for MongoDB connection (removed hard-coded URI)
+        client = MongoClient(st.secrets["MONGO_URI"], server_api=ServerApi('1'))
         client.admin.command("ping")
+        st.success("✅ Successfully connected to MongoDB!")
 
         col = client["ind320"]["elhub_production_data_2021"]
         df_energy = pd.DataFrame(col.find({}, {"_id": 0}))
+        
         if df_energy.empty:
             st.info("No documents found in MongoDB collection.")
         else:
@@ -154,6 +147,7 @@ elif page == "Project 2: Energy Dashboard":
                     st.info("No data available for this selection.")
     except Exception as e:
         st.error(f"Database error: {e}")
+        st.info("Please check your MongoDB connection settings in Streamlit Secrets")
 
 # ---------- About ----------
 elif page == "About":

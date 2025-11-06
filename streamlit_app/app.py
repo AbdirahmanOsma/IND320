@@ -15,8 +15,24 @@ from sklearn.neighbors import LocalOutlierFactor
 from statsmodels.tsa.seasonal import STL
 from scipy.signal import spectrogram
 
-load_dotenv()
-MONGODB_URI = os.getenv("MONGODB_URI")
+load_dotenv()  # local dev fallback
+
+def _get_mongo_uri() -> str | None:
+    # Streamlit Cloud first
+    try:
+        return st.secrets["MONGODB_URI"]
+    except Exception:
+        pass
+    # Local .env fallback
+    return os.getenv("MONGODB_URI")
+
+MONGODB_URI = _get_mongo_uri()
+if not MONGODB_URI:
+    st.error("Missing MONGODB_URI. Set it in Streamlit Secrets (Cloud) or .env (local).")
+    st.stop()
+
+# Debug line - show which database you're connecting to
+st.caption("Mongo host: " + MONGODB_URI.split("@")[-1])
 
 st.set_page_config(page_title="IND320 - Dashboard (Part 1 + 2 + 3)", layout="wide")
 
@@ -205,9 +221,13 @@ def get_sample_energy_data():
 @st.cache_resource
 def get_energy_data():
     try:
+        st.info("Connecting to MongoDB...")
+        
         # Use environment variable for MongoDB connection
         client = MongoClient(MONGODB_URI, server_api=ServerApi('1'))
         client.admin.command('ping')
+        st.success("Connected to MongoDB Atlas!")
+        
         database = client["ind320"]
         collection = database["elhub_production_data_2021"]
         data = list(collection.find({}, {"_id": 0}))

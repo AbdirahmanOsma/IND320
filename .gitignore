@@ -1,2 +1,6 @@
+password.txt
 .env 
 *.env 
+
+# Ignore Streamlit secrets (MongoDB credentials)
+**/.streamlit/secrets.toml

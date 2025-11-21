@@ -14,6 +14,7 @@ from scipy.fftpack import dct, idct
 from sklearn.neighbors import LocalOutlierFactor
 from statsmodels.tsa.seasonal import STL
 from scipy.signal import spectrogram
+import plotly.graph_objects as go  
 
 load_dotenv()  # local dev fallback
 
@@ -37,9 +38,14 @@ st.caption("Mongo host: " + MONGODB_URI.split("@")[-1])
 st.set_page_config(page_title="IND320 - Dashboard (Part 1 + 2 + 3)", layout="wide")
 
 # --- Weather API Function ---
-@st.cache_data
+@st.cache_data(ttl=3600)  # Cache for 1 hour to avoid rate limits
 def download_weather_data(latitude, longitude, year=2021):
     """Download historical weather data from open-meteo.com for 2021"""
+    import time
+    
+    # Add delay to avoid rate limiting
+    time.sleep(1)
+    
     url = (
         "https://archive-api.open-meteo.com/v1/era5"
         f"?latitude={latitude}"
@@ -50,13 +56,23 @@ def download_weather_data(latitude, longitude, year=2021):
         "pressure_msl,wind_speed_10m"
         "&timezone=Europe%2FOslo"
     )
-    response = requests.get(url)
-    if response.status_code != 200:
-        raise Exception(f"API Error {response.status_code}: {response.text}")
-    data = response.json()
-    df = pd.DataFrame(data["hourly"])
-    df["time"] = pd.to_datetime(df["time"])
-    return df
+    
+    try:
+        response = requests.get(url)
+        if response.status_code == 429:
+            st.error("API rate limit exceeded. Please wait a moment and try again.")
+            return None
+        elif response.status_code != 200:
+            raise Exception(f"API Error {response.status_code}: {response.text}")
+        
+        data = response.json()
+        df = pd.DataFrame(data["hourly"])
+        df["time"] = pd.to_datetime(df["time"])
+        return df
+        
+    except Exception as e:
+        st.error(f"Weather API error: {e}")
+        return None
 
 # City coordinates for price areas
 cities = {
@@ -68,47 +84,137 @@ cities = {
 }
 
 # --- Analysis Functions ---
-def plot_temperature_outliers(df, temp_col="temperature_2m", time_col="time", 
-                             cutoff_freq=0.02, n_sigma=3.0):
+def plot_temperature_outliers(
+    df: pd.DataFrame,
+    temp_col: str = "temperature_2m",
+    time_col: str = "time",
+    cutoff_freq: float = 0.02,
+    n_sigma: float = 3.0
+):
+    """
+    Detect and visualise temperature outliers using:
+    1) DCT high-pass (seasonally adjusted temperature variations, SATV)
+    2) Robust SPC limits on SATV
+
+    Returns: (fig, summary_dict, satv_series)
+    """
+
+    if temp_col not in df.columns:
+        raise KeyError(f"Expected column '{temp_col}'")
+    if time_col not in df.columns:
+        raise KeyError(f"Expected column '{time_col}'")
+
+    # Prepare time series
     d = df[[time_col, temp_col]].copy()
-    d = d.dropna(subset=[temp_col]).drop_duplicates(subset=[time_col]).sort_values(time_col)
+    d = (
+        d.dropna(subset=[temp_col])
+         .drop_duplicates(subset=[time_col])
+         .sort_values(time_col)
+    )
     d[time_col] = pd.to_datetime(d[time_col], utc=True)
+
+    # Interpolate small gaps
     d[temp_col] = d[temp_col].interpolate(limit_direction="both")
-    
+
+    # Original temperature series
     x = d[temp_col].to_numpy()
+
+    # DCT -> high-pass filter -> iDCT
     X = dct(x, norm="ortho")
     n = len(X)
-    cut_idx = int(np.clip(cutoff_freq * n, 0, n-1))
-    X[:cut_idx] = 0.0
-    satv = idct(X, norm="ortho")
-    
+    cut_idx = int(np.clip(cutoff_freq * n, 0, n - 1))
+    X[:cut_idx] = 0.0  # remove very low frequencies
+    satv = idct(X, norm="ortho")  # SATV: high-frequency component
+
+    # Robust SPC limits on SATV
     med = np.median(satv)
     mad = np.median(np.abs(satv - med))
     robust_sd = 1.4826 * mad if mad > 0 else np.std(satv)
     upper = med + n_sigma * robust_sd
     lower = med - n_sigma * robust_sd
+
     outlier_mask = (satv > upper) | (satv < lower)
-    
-    fig, ax = plt.subplots(figsize=(12, 6))
-    ax.plot(d[time_col], d[temp_col], label="Temperature", linewidth=1)
+
+    # Reconstruct low-frequency trend
+    trend = x - satv  # trend = original - high-frequency component
+
+    # Map SATV limits back to temperature space
+    upper_band = trend + (upper - med)
+    lower_band = trend + (lower - med)
+
+    # Plot
+    fig = go.Figure()
+
+    # Temperature curve
+    fig.add_trace(
+        go.Scatter(
+            x=d[time_col],
+            y=d[temp_col],
+            mode="lines",
+            name="Temperature",
+            line=dict(width=1.8),
+        )
+    )
+
+    # Outliers
     if outlier_mask.any():
-        ax.scatter(d.loc[outlier_mask, time_col], d.loc[outlier_mask, temp_col], 
-                  color="red", label="Outliers", s=20)
-    ax.axhline(d[temp_col].mean() + (upper-med), linestyle="--", color="green", label="Upper limit")
-    ax.axhline(d[temp_col].mean() + (lower-med), linestyle="--", color="orange", label="Lower limit")
-    ax.set_xlabel("Time")
-    ax.set_ylabel("Temperature (°C)")
-    ax.set_title("Temperature Outlier Detection - DCT + SPC")
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    
+        fig.add_trace(
+            go.Scatter(
+                x=d.loc[outlier_mask, time_col],
+                y=d.loc[outlier_mask, temp_col],
+                mode="markers",
+                name="Outliers",
+                marker=dict(color="crimson", size=7, symbol="circle"),
+                hovertemplate="Time: %{x}<br>Temp: %{y:.2f} °C<extra></extra>",
+            )
+        )
+
+    # SPC bands following the trend (corrected version)
+    fig.add_trace(
+        go.Scatter(
+            x=d[time_col],
+            y=upper_band,
+            mode="lines",
+            name="Upper SPC limit",
+            line=dict(color="green", dash="dash"),
+        )
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=d[time_col],
+            y=lower_band,
+            mode="lines",
+            name="Lower SPC limit",
+            line=dict(color="orange", dash="dash"),
+        )
+    )
+
+    fig.update_layout(
+        title="Temperature Outlier Detection - DCT (high-pass) + SPC",
+        xaxis_title="Time",
+        yaxis_title="Temperature (°C)",
+        template="plotly_white",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="center",
+            x=0.5,
+        ),
+    )
+
     summary = {
-        "n_points": len(d),
-        "n_outliers": outlier_mask.sum(),
+        "n_points": int(len(d)),
+        "n_outliers": int(outlier_mask.sum()),
         "outlier_percent": round(100 * outlier_mask.mean(), 2),
-        "robust_sd": robust_sd,
+        "robust_sd": float(robust_sd),
+        "spc_limits_on_SATV": (float(lower), float(upper)),
+        "cutoff_freq": float(cutoff_freq),
+        "n_sigma": float(n_sigma),
     }
-    return fig, summary
+
+    return fig, summary, pd.Series(satv, index=d[time_col], name="SATV")
 
 def detect_precipitation_anomalies(df, precip_col="precipitation", time_col="time", contamination=0.01):
     d = df[[time_col, precip_col]].copy()
@@ -530,12 +636,12 @@ elif page == "Outlier / Anomaly (Part 3B)":
             if st.button("Detect Temperature Outliers", key="temp_button"):
                 with st.spinner("Detecting temperature outliers..."):
                     try:
-                        fig, summary = plot_temperature_outliers(
+                        fig, summary, satv_series = plot_temperature_outliers(
                             df, 
                             cutoff_freq=cutoff_freq,
                             n_sigma=n_sigma
                         )
-                        st.pyplot(fig)
+                        st.plotly_chart(fig, use_container_width=True)
                         
                         st.subheader("Summary Statistics")
                         col1, col2, col3 = st.columns(3)

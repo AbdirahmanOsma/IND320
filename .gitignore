@@ -3,4 +3,4 @@ password.txt
 *.env 
 
 # Ignore Streamlit secrets (MongoDB credentials)
-**/.streamlit/secrets.toml
+**/.streamlit/secrets.toml"streamlit_app/__pycache__/" 

@@ -27,3 +27,6 @@ lipsum
 pymongo
 streamlit
 python-dotenv 
+folium
+streamlit-folium
+

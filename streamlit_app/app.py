@@ -211,6 +211,7 @@ def detect_precipitation_anomalies(
     """
     d = df[[time_col, precip_col]].copy()
     d = d.dropna(subset=[precip_col])
+    d = d.drop_duplicates(subset=[time_col])
     d[time_col] = pd.to_datetime(d[time_col], utc=True)
     d = d.sort_values(time_col)
 
@@ -1247,15 +1248,17 @@ elif page == "Map & Selectors (Part 4A)":
         # color by mean kWh
         if pa in mean_dict and vmax > vmin:
             r = (mean_dict[pa] - vmin) / (vmax - vmin + 1e-9)
-            red = int(255 * r)
-            style["fillColor"] = f"#{red:02x}0000"
+            import matplotlib.colors as mcolors
+            cmap = mcolors.LinearSegmentedColormap.from_list("", ["#ffffcc","#800026"])
+            style["fillColor"] = mcolors.to_hex(cmap(r))
         else:
             style["fillColor"] = "#cccccc"
 
         # highlight selected PA
         if highlight_area != "None" and pa == highlight_area:
             style["color"] = "blue"
-            style["weight"] = 3.0
+            style["weight"] = 4.0
+            style["fillOpacity"] = 0.95
 
         return style
 
@@ -1263,6 +1266,7 @@ elif page == "Map & Selectors (Part 4A)":
         geojson_data,
         name="Elspot Areas",
         style_function=style_function,
+        highlight_function=lambda x: {"weight": 3, "color": "yellow"},
         tooltip=folium.features.GeoJsonTooltip(
             fields=list(geojson_data["features"][0]["properties"].keys()),
             sticky=True,
@@ -1540,6 +1544,7 @@ elif page == "Meteorology & Energy":
             legend_title_text="Series",
             margin=dict(l=0, r=0, t=30, b=0),
         )
+        fig_ts.update_xaxes(matches='x')
         st.plotly_chart(fig_ts, use_container_width=True)
 
         # ===== Plot 2: sliding window correlation =====

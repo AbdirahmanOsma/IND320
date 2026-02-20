@@ -23,7 +23,6 @@ anywidget
 pydub
 sounddevice
 kaleido
-lipsum
 pymongo
 streamlit
 python-dotenv 

@@ -23,7 +23,8 @@ anywidget
 pydub
 sounddevice
 kaleido
-pymongo
+pymongo==4.18.0
+dnspython==2.8.0
 streamlit
 python-dotenv 
 folium
